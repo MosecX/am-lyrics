@@ -6150,18 +6150,19 @@ export class AmLyrics extends LitElement {
     durationMs: number,
     background = false,
   ): 'none' | 'rise' | 'emphasis' {
-    // Native constructor RVA 0x2f483c–0x2f48e0 and draw gate 0x2f662f.
-    // 0x2f4080 detects Chinese/Japanese; Hangul is not part of that predicate.
-    // Keep connected RTL scripts intact in the browser renderer.
-    if (/[\u0590-\u08ff]/.test(text)) return 'none';
+    // Caracter rise/glow para la mayoría de palabras con cuerpo.
+    // Se excluyen solo conectores de una letra y palabras que duran
+    // poquísimo, donde el salto de carácter se ve apretado.
     const count = Array.from(text.trim()).length;
     if (!count) return 'none';
     if (/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/.test(text)) {
       return count > 1 ? 'rise' : 'none';
     }
-    return !background && durationMs >= 1000 && count <= 7
-      ? 'emphasis'
-      : 'none';
+    // Umbrales pulidos: permisivo pero sin conectores sueltos.
+    const MIN_CHARS = 2; // 1 letra (a, y, o) = sin efecto
+    const MIN_MS = 350; // menos de 350 ms = demasiado breve
+    if (count < MIN_CHARS || durationMs < MIN_MS) return 'none';
+    return 'emphasis';
   }
 
   private static overlapSegmenter = (Intl as any).Segmenter
@@ -9106,11 +9107,18 @@ export class AmLyrics extends LitElement {
       const staggerMs = ((duration * 1000) / count) * (cjk ? 0.4 : 0.35);
       const delayMs = cjk
         ? Math.min(staggerMs, 50, 200 / count)
-        : Math.min(staggerMs, 350);
+        : Math.min(staggerMs, 300);
       const hold = (2 * duration) / count;
-      const response = Math.min(3, duration);
-      const emphasis = cjk ? 0 : AmLyrics.clamp(duration - 1, 0, 1);
-      const glow = cjk ? 0 : 0.45 * AmLyrics.clamp((duration - 1) / 0.5, 0, 1);
+      const response = cjk
+        ? Math.min(2.0, duration)
+        : Math.min(2.2, duration * 1.2);
+      const baseFactor = AmLyrics.clamp(duration * 0.9, 0, 1);
+      // Atenuación extra para palabras muy breves: evitan que se vean exageradas
+      const briefAttenuation = cjk
+        ? 1
+        : AmLyrics.clamp(duration / 0.5, 0.25, 1);
+      const emphasis = cjk ? 0 : 0.8 * baseFactor * briefAttenuation;
+      const glow = cjk ? 0 : 0.35 * baseFactor * briefAttenuation;
       const spanDuration = Math.max(hold + response * 2, cjk ? 3 : 0);
       chars.forEach((char, index) => {
         const startDelay = (index + 1) * delayMs;
@@ -9141,11 +9149,11 @@ export class AmLyrics extends LitElement {
                 : AmLyrics.springProgress(time, response) *
                   (1 - AmLyrics.springProgress(time - hold, response));
               const x =
-                (index - (count - 1) / 2) * 0.5 * 0.1 * emphasis * envelope;
-              const lift = 2.5 * emphasis * envelope;
+                (index - (count - 1) / 2) * 0.3 * 0.06 * emphasis * envelope;
+              const lift = 1.6 * emphasis * envelope;
               return {
                 offset: frame / 60,
-                transform: `translate(calc(${x}em * var(--am-lyrics-lift)), calc((var(--char-rise-y) * ${rise} - ${lift}px) * var(--am-lyrics-lift))) scale(${1 + 0.1 * emphasis * envelope})`,
+                transform: `translate(calc(${x}em * var(--am-lyrics-lift)), calc((var(--char-rise-y) * ${rise} - ${lift}px) * var(--am-lyrics-lift))) scale(${1 + 0.06 * emphasis * envelope})`,
               };
             });
             if (AmLyrics.characterFrames.size >= 64) {
